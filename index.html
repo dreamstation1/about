@@ -1,0 +1,1288 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>카페 주문 호출 시스템</title>
+    <style>
+        :root {
+            --bg-dark: #1a1a1a;
+            --bg-darker: #111;
+            --text-white: #ffffff;
+            --red-pill: #c53030;
+            --red-pill-light: #e53e3e;
+            --red-pill-hover: #9b2c2c;
+            --slide-1: #f6e05e;
+            --slide-2: #f69d3c; 
+            --slide-3: #744210;
+            --sky-blue: #63b3ed;
+            --modal-bg: rgba(0, 0, 0, 0.85);
+        }
+
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            background: var(--bg-darker);
+            color: var(--text-white);
+            width: 100vw;
+            height: 100vh;
+            overflow: hidden;
+            display: flex;
+        }
+
+        /* 좌측 주문 리스트 영역 (25%) */
+        aside {
+            width: 25%;
+            background: var(--bg-dark);
+            border-right: 2px solid #333;
+            display: flex;
+            flex-direction: column;
+            padding: 2rem;
+            overflow-y: auto;
+            z-index: 10;
+        }
+
+        aside h2 {
+            font-size: 2rem;
+            margin-bottom: 2rem;
+            text-align: center;
+            color: var(--text-white);
+            font-weight: 700;
+        }
+
+        #orderList {
+            display: flex;
+            flex-direction: column;
+            gap: 1rem;
+            flex: 1;
+        }
+
+        .order-item {
+            background: var(--red-pill);
+            color: var(--text-white);
+            padding: 1.5rem 2rem;
+            border-radius: 9999px;
+            font-size: 1.8rem;
+            font-weight: 700;
+            text-align: center;
+            cursor: pointer;
+            transition: all 0.3s ease;
+            border: 3px solid transparent;
+            box-shadow: 0 4px 6px rgba(0, 0, 0, 0.3);
+        }
+
+        .order-item:hover {
+            background: var(--red-pill-hover);
+            transform: scale(1.05);
+        }
+
+        .order-item.active {
+            background: var(--red-pill);
+            border-color: transparent;
+            box-shadow: none;
+            animation: none;
+        }
+
+        /* 5분 후 리스트에서 제거 시 오른쪽으로 슬라이드 아웃 */
+        .order-item.exit {
+            transform: translateX(100vw);
+            opacity: 0;
+            transition: transform 0.8s ease-in-out, opacity 0.8s ease-in-out;
+        }
+
+        @keyframes pulse {
+            0%, 100% {
+                box-shadow: 0 0 20px rgba(252, 129, 129, 0.6),
+                            0 0 40px rgba(252, 129, 129, 0.4),
+                            0 0 60px rgba(252, 129, 129, 0.2);
+            }
+            50% {
+                box-shadow: 0 0 30px rgba(252, 129, 129, 0.8),
+                            0 0 50px rgba(252, 129, 129, 0.6),
+                            0 0 70px rgba(252, 129, 129, 0.4);
+            }
+        }
+
+        /* 우측 메인 영역 (75%) */
+        main {
+            width: 75%;
+            position: relative;
+            overflow: hidden;
+            display: flex;
+            flex-direction: column;
+            justify-content: center;
+            align-items: center;
+        }
+
+        /* 광고 슬라이드 배경 */
+        .slide-container {
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            z-index: 1;
+        }
+
+        .slide {
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            opacity: 0;
+            transition: opacity 1s ease-in-out;
+            overflow: hidden;
+        }
+
+        .slide.active {
+            opacity: 1;
+        }
+
+        .slide img {
+            width: 100%;
+            height: 100%;
+            object-fit: contain;
+            object-position: top center;
+            display: block;
+        }
+
+        /* 호출 번호 표시 영역 */
+        .call-display {
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            z-index: 2;
+            text-align: center;
+            padding: 0;
+            background: rgba(0, 0, 0, 0.6);
+            border-radius: 0;
+            backdrop-filter: none;
+            margin-bottom: 0;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            transition: transform 0.8s ease-in-out, opacity 0.8s ease-in-out;
+            transform: translateX(0);
+            opacity: 1;
+        }
+
+        .call-display.hidden {
+            transform: translateX(100vw);
+            opacity: 0;
+            pointer-events: none;
+        }
+
+        .call-number {
+            font-size: clamp(140px, 18vw, 360px);
+            font-weight: 900;
+            color: var(--text-white);
+            text-shadow: 4px 4px 20px rgba(0, 0, 0, 0.5),
+                         0 0 40px rgba(99, 179, 237, 0.3);
+            line-height: 1;
+            margin-bottom: 1rem;
+            transition: transform 0.5s ease, opacity 0.5s ease;
+        }
+
+        .call-number.animate {
+            animation: numberPop 0.6s ease-out;
+        }
+
+        @keyframes numberPop {
+            0% {
+                transform: scale(0.8);
+                opacity: 0;
+            }
+            50% {
+                transform: scale(1.1);
+            }
+            100% {
+                transform: scale(1);
+                opacity: 1;
+            }
+        }
+
+        .call-message {
+            font-size: 2.5rem;
+            color: var(--text-white);
+            font-weight: 700;
+            text-shadow: 2px 2px 10px rgba(0, 0, 0, 0.5);
+        }
+
+        /* 관리자 버튼 */
+        .admin-toggle {
+            position: fixed;
+            top: 20px;
+            right: 20px;
+            z-index: 1000;
+            background: rgba(255, 255, 255, 0.1);
+            color: var(--text-white);
+            border: 2px solid rgba(255, 255, 255, 0.3);
+            padding: 0.8rem 1.5rem;
+            border-radius: 8px;
+            cursor: pointer;
+            font-size: 1rem;
+            font-weight: 600;
+            transition: all 0.3s ease;
+            backdrop-filter: blur(10px);
+        }
+
+        .admin-toggle:hover {
+            background: rgba(255, 255, 255, 0.2);
+            border-color: rgba(255, 255, 255, 0.5);
+        }
+
+        /* 관리자 모달 */
+        .admin-modal {
+            display: none;
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            background: var(--modal-bg);
+            z-index: 2000;
+            justify-content: center;
+            align-items: center;
+            backdrop-filter: blur(5px);
+        }
+
+        .admin-modal.active {
+            display: flex;
+        }
+
+        .admin-panel {
+            background: var(--bg-dark);
+            border: 2px solid #444;
+            border-radius: 20px;
+            padding: 2rem;
+            width: 90%;
+            max-width: 600px;
+            max-height: 90vh;
+            overflow-y: auto;
+            box-shadow: 0 10px 40px rgba(0, 0, 0, 0.5);
+        }
+
+        .admin-panel h3 {
+            font-size: 2rem;
+            margin-bottom: 1.5rem;
+            text-align: center;
+            color: var(--text-white);
+        }
+
+        .admin-section {
+            margin-bottom: 2rem;
+            padding-bottom: 2rem;
+            border-bottom: 1px solid #444;
+        }
+
+        .admin-section:last-child {
+            border-bottom: none;
+        }
+
+        .admin-section h4 {
+            font-size: 1.3rem;
+            margin-bottom: 1rem;
+            color: var(--text-white);
+        }
+
+        .input-group {
+            display: flex;
+            gap: 0.5rem;
+            margin-bottom: 1rem;
+        }
+
+        .input-group input {
+            flex: 1;
+            padding: 0.8rem;
+            border: 2px solid #444;
+            border-radius: 8px;
+            background: var(--bg-darker);
+            color: var(--text-white);
+            font-size: 1rem;
+        }
+
+        .input-group input:focus {
+            outline: none;
+            border-color: var(--sky-blue);
+        }
+
+        .btn {
+            padding: 0.8rem 1.5rem;
+            border: none;
+            border-radius: 8px;
+            font-size: 1rem;
+            font-weight: 600;
+            cursor: pointer;
+            transition: all 0.3s ease;
+        }
+
+        .btn-primary {
+            background: var(--sky-blue);
+            color: var(--text-white);
+        }
+
+        .btn-primary:hover {
+            background: #4299e1;
+            transform: translateY(-2px);
+            box-shadow: 0 4px 8px rgba(0, 0, 0, 0.3);
+        }
+
+        .btn-danger {
+            background: var(--red-pill);
+            color: var(--text-white);
+        }
+
+        .btn-danger:hover {
+            background: var(--red-pill-hover);
+            transform: translateY(-2px);
+            box-shadow: 0 4px 8px rgba(0, 0, 0, 0.3);
+        }
+
+        .toggle-group {
+            display: flex;
+            align-items: center;
+            gap: 1rem;
+            margin-bottom: 1rem;
+        }
+
+        .toggle-switch {
+            position: relative;
+            width: 60px;
+            height: 30px;
+            background: #444;
+            border-radius: 15px;
+            cursor: pointer;
+            transition: background 0.3s ease;
+        }
+
+        .toggle-switch.active {
+            background: var(--sky-blue);
+        }
+
+        .toggle-switch::after {
+            content: '';
+            position: absolute;
+            width: 26px;
+            height: 26px;
+            background: white;
+            border-radius: 50%;
+            top: 2px;
+            left: 2px;
+            transition: transform 0.3s ease;
+        }
+
+        .toggle-switch.active::after {
+            transform: translateX(30px);
+        }
+
+        .toggle-label {
+            font-size: 1rem;
+            color: var(--text-white);
+        }
+
+        /* 숫자 키패드 */
+        .keypad {
+            display: grid;
+            grid-template-columns: repeat(3, 1fr);
+            gap: 0.8rem;
+            margin-top: 1rem;
+        }
+
+        .keypad-btn {
+            background: var(--bg-darker);
+            border: 2px solid #444;
+            border-radius: 12px;
+            color: var(--text-white);
+            font-size: 2rem;
+            font-weight: 700;
+            padding: 1.5rem;
+            cursor: pointer;
+            transition: all 0.2s ease;
+            min-height: 70px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+        }
+
+        .keypad-btn:hover {
+            background: var(--sky-blue);
+            border-color: var(--sky-blue);
+            transform: scale(1.05);
+        }
+
+        .keypad-btn:active {
+            transform: scale(0.95);
+        }
+
+        .keypad-btn.clear {
+            grid-column: span 2;
+            background: var(--red-pill);
+        }
+
+        .keypad-btn.clear:hover {
+            background: var(--red-pill-hover);
+        }
+
+        .keypad-btn.enter {
+            grid-column: span 1;
+            background: #48bb78;
+        }
+
+        .keypad-btn.enter:hover {
+            background: #38a169;
+        }
+
+        .input-display {
+            font-size: 2rem;
+            font-weight: 700;
+            color: var(--text-white);
+            background: var(--bg-darker);
+            border: 2px solid #444;
+            border-radius: 8px;
+            padding: 1rem;
+            text-align: center;
+            min-height: 60px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            margin-bottom: 1rem;
+        }
+
+        /* 메인 화면 키패드 컨트롤 */
+        .main-keypad {
+            position: fixed;
+            bottom: 30px;
+            right: 30px;
+            z-index: 500;
+            background: rgba(26, 26, 26, 0.95);
+            border: 2px solid #444;
+            border-radius: 15px;
+            padding: 1.5rem;
+            backdrop-filter: blur(10px);
+            box-shadow: 0 10px 40px rgba(0, 0, 0, 0.5);
+            min-width: 300px;
+        }
+
+        .main-keypad-title {
+            font-size: 1.2rem;
+            font-weight: 600;
+            color: var(--text-white);
+            margin-bottom: 1rem;
+            text-align: center;
+        }
+
+        .main-keypad-display {
+            font-size: 2.5rem;
+            font-weight: 700;
+            color: var(--text-white);
+            background: var(--bg-darker);
+            border: 2px solid #444;
+            border-radius: 8px;
+            padding: 1rem;
+            text-align: center;
+            min-height: 70px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            margin-bottom: 1rem;
+            letter-spacing: 0.2em;
+        }
+
+        .main-keypad-grid {
+            display: grid;
+            grid-template-columns: repeat(3, 1fr);
+            gap: 0.6rem;
+            margin-bottom: 0.6rem;
+        }
+
+        .main-keypad-btn {
+            background: var(--bg-darker);
+            border: 2px solid #444;
+            border-radius: 10px;
+            color: var(--text-white);
+            font-size: 1.5rem;
+            font-weight: 700;
+            padding: 1rem;
+            cursor: pointer;
+            transition: all 0.2s ease;
+            min-height: 60px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+        }
+
+        .main-keypad-btn:hover {
+            background: var(--sky-blue);
+            border-color: var(--sky-blue);
+            transform: scale(1.05);
+        }
+
+        .main-keypad-btn:active {
+            transform: scale(0.95);
+        }
+
+        .main-keypad-actions {
+            display: grid;
+            grid-template-columns: 2fr 1fr;
+            gap: 0.6rem;
+        }
+
+        .main-keypad-clear {
+            background: var(--red-pill);
+            border-color: var(--red-pill);
+        }
+
+        .main-keypad-clear:hover {
+            background: var(--red-pill-hover);
+            border-color: var(--red-pill-hover);
+        }
+
+        .main-keypad-call {
+            background: #48bb78;
+            border-color: #48bb78;
+        }
+
+        .main-keypad-call:hover {
+            background: #38a169;
+            border-color: #38a169;
+        }
+
+        @media (max-width: 1600px) {
+            .call-number {
+                font-size: 200px;
+            }
+        }
+
+        @media (max-width: 1200px) {
+            aside {
+                width: 30%;
+            }
+            main {
+                width: 70%;
+            }
+            .call-number {
+                font-size: 150px;
+            }
+            .slide-title {
+                font-size: 3.5rem;
+            }
+        }
+    </style>
+</head>
+<body>
+    <!-- 좌측 주문 리스트 -->
+    <aside>
+        <h2>주문번호</h2>
+        <div id="orderList"></div>
+    </aside>
+
+    <!-- 우측 메인 영역 -->
+    <main>
+        <!-- 광고 슬라이드 배경 -->
+        <div class="slide-container">
+            <div class="slide active">
+                <img src="C:\Users\soba0\OneDrive\바탕 화면/a.jpg" alt="광고 이미지 1">
+            </div>
+            <div class="slide">
+                <img src="C:\Users\soba0\OneDrive\바탕 화면/b.png" alt="광고 이미지 2">
+            </div>
+            <div class="slide">
+                <img src="C:\Users\soba0\OneDrive\바탕 화면/c.jpg" alt="광고 이미지 3">
+            </div>
+            <div class="slide">
+                <img src="C:\Users\soba0\OneDrive\바탕 화면/d.jpg" alt="광고 이미지 4">
+            </div>
+        </div>
+
+        <!-- 호출 번호 표시 -->
+        <div class="call-display">
+            <div id="callNumber" class="call-number">157</div>
+            <div id="callMessage" class="call-message">157번 고객님 주문하신 음료 나왔습니다.</div>
+        </div>
+    </main>
+
+    <!-- 관리자 모달 -->
+    <div class="admin-modal" id="adminModal">
+        <div class="admin-panel">
+            <h3>관리자 패널</h3>
+
+            <!-- 새 주문 추가 -->
+            <section class="admin-section">
+                <h4>새 주문 추가</h4>
+                <div class="input-display" id="newOrderDisplay">0</div>
+                <div class="keypad" id="newOrderKeypad">
+                    <div class="keypad-btn" data-key="1">1</div>
+                    <div class="keypad-btn" data-key="2">2</div>
+                    <div class="keypad-btn" data-key="3">3</div>
+                    <div class="keypad-btn" data-key="4">4</div>
+                    <div class="keypad-btn" data-key="5">5</div>
+                    <div class="keypad-btn" data-key="6">6</div>
+                    <div class="keypad-btn" data-key="7">7</div>
+                    <div class="keypad-btn" data-key="8">8</div>
+                    <div class="keypad-btn" data-key="9">9</div>
+                    <div class="keypad-btn clear" data-action="clear">지우기</div>
+                    <div class="keypad-btn" data-key="0">0</div>
+                    <div class="keypad-btn enter" data-action="add">추가</div>
+                </div>
+                <div class="input-group" style="display: none;">
+                    <input type="number" id="newOrderInput" placeholder="주문번호 입력" min="1">
+                    <button class="btn btn-primary" id="addOrderBtn">추가</button>
+                </div>
+            </section>
+
+            <!-- 다음 번호 호출 -->
+            <section class="admin-section">
+                <h4>다음 번호 호출</h4>
+                <button class="btn btn-primary" id="callNextBtn">다음 번호 호출</button>
+            </section>
+
+            <!-- 특정 번호 호출 -->
+            <section class="admin-section">
+                <h4>특정 번호 호출</h4>
+                <div class="input-display" id="callSpecificDisplay">0</div>
+                <div class="keypad" id="callSpecificKeypad">
+                    <div class="keypad-btn" data-key="1">1</div>
+                    <div class="keypad-btn" data-key="2">2</div>
+                    <div class="keypad-btn" data-key="3">3</div>
+                    <div class="keypad-btn" data-key="4">4</div>
+                    <div class="keypad-btn" data-key="5">5</div>
+                    <div class="keypad-btn" data-key="6">6</div>
+                    <div class="keypad-btn" data-key="7">7</div>
+                    <div class="keypad-btn" data-key="8">8</div>
+                    <div class="keypad-btn" data-key="9">9</div>
+                    <div class="keypad-btn clear" data-action="clear">지우기</div>
+                    <div class="keypad-btn" data-key="0">0</div>
+                    <div class="keypad-btn enter" data-action="call">호출</div>
+                </div>
+                <div class="input-group" style="display: none;">
+                    <input type="number" id="callSpecificInput" placeholder="호출할 번호 입력" min="1">
+                    <button class="btn btn-primary" id="callSpecificBtn">해당 번호 호출</button>
+                </div>
+            </section>
+
+            <!-- 옵션 토글 -->
+            <section class="admin-section">
+                <h4>옵션</h4>
+                <div class="toggle-group">
+                    <span class="toggle-label">호출 시 리스트에서 제거</span>
+                    <div class="toggle-switch" id="removeOnCallToggle"></div>
+                </div>
+                <div class="toggle-group">
+                    <span class="toggle-label">음성 안내 사용</span>
+                    <div class="toggle-switch active" id="ttsToggle"></div>
+                </div>
+            </section>
+
+            <!-- 전체 초기화 -->
+            <section class="admin-section">
+                <h4>초기화</h4>
+                <button class="btn btn-danger" id="resetBtn">모든 주문 초기화</button>
+            </section>
+        </div>
+    </div>
+
+    <script>
+        // 상태 관리
+        let orderQueue = [157, 160, 159, 158, 210, 368];
+        let currentNumber = 157;
+        let removeOnCall = false;
+        let ttsEnabled = true;
+        let slideIndex = 0;
+        let slideInterval = null;
+        let callDisplayTimeout = null;
+        const AUTO_REMOVE_MS = 5 * 60 * 1000; // 5분
+        const EXIT_ANIM_MS = 800; // 슬라이드 아웃 애니메이션 시간
+        const autoRemoveTimers = new Map(); // number -> timeoutId
+
+        // 로컬 MP3 재생 설정 및 헬퍼
+        const AUDIO_BASE = './tts'; // 예: index.html과 같은 폴더에 tts 폴더
+        const AUDIO_EXT = '.mp3';
+        const AUDIO_LAST = 'last';
+        let currentAudio = null;
+
+        function numberToPlaceValues(n) {
+            const trimmed = String(n).replace(/^0+/, '') || '0';
+            const digits = trimmed.split('').reverse();
+            const values = [];
+            for (let i = 0; i < digits.length; i++) {
+                const d = Number(digits[i]);
+                if (d > 0) values.push(d * Math.pow(10, i)); // 158 -> [100, 50, 8]
+            }
+            return values.reverse();
+        }
+
+        function playUrl(url) {
+            return new Promise((resolve, reject) => {
+                if (currentAudio) {
+                    try { currentAudio.pause(); currentAudio.src = ''; } catch {}
+                    currentAudio = null;
+                }
+                const audio = new Audio(url);
+                currentAudio = audio;
+                audio.onended = () => resolve();
+                audio.onerror = () => reject(new Error('오디오 로드 실패: ' + url));
+                const p = audio.play();
+                if (p && typeof p.then === 'function') p.catch(reject);
+            });
+        }
+
+        async function playSequence(urls) {
+            for (const url of urls) {
+                await playUrl(url);
+            }
+        }
+
+        // localStorage 키
+        const STORAGE_KEYS = {
+            ORDER_QUEUE: 'cafe_orderQueue',
+            CURRENT_NUMBER: 'cafe_currentNumber',
+            REMOVE_ON_CALL: 'cafe_removeOnCall',
+            TTS_ENABLED: 'cafe_ttsEnabled'
+        };
+
+        // 초기화
+        function init() {
+            loadFromStorage();
+            renderOrderList();
+            renderCurrentNumber(false); // 초기 로드 시에는 호출 표시 숨김
+            startSlideShow();
+            setupEventListeners();
+        }
+
+        // localStorage에서 데이터 불러오기
+        function loadFromStorage() {
+            const savedQueue = localStorage.getItem(STORAGE_KEYS.ORDER_QUEUE);
+            const savedNumber = localStorage.getItem(STORAGE_KEYS.CURRENT_NUMBER);
+            const savedRemoveOnCall = localStorage.getItem(STORAGE_KEYS.REMOVE_ON_CALL);
+            const savedTtsEnabled = localStorage.getItem(STORAGE_KEYS.TTS_ENABLED);
+
+            if (savedQueue) {
+                orderQueue = JSON.parse(savedQueue);
+            }
+            if (savedNumber) {
+                currentNumber = parseInt(savedNumber);
+            }
+            if (savedRemoveOnCall !== null) {
+                removeOnCall = savedRemoveOnCall === 'true';
+            }
+            if (savedTtsEnabled !== null) {
+                ttsEnabled = savedTtsEnabled === 'true';
+            }
+
+            // 토글 상태 업데이트
+            updateToggleStates();
+        }
+
+        // localStorage에 데이터 저장
+        function saveToStorage() {
+            localStorage.setItem(STORAGE_KEYS.ORDER_QUEUE, JSON.stringify(orderQueue));
+            localStorage.setItem(STORAGE_KEYS.CURRENT_NUMBER, currentNumber.toString());
+            localStorage.setItem(STORAGE_KEYS.REMOVE_ON_CALL, removeOnCall.toString());
+            localStorage.setItem(STORAGE_KEYS.TTS_ENABLED, ttsEnabled.toString());
+        }
+
+        // 주문 리스트 렌더링
+        function renderOrderList() {
+            const orderListEl = document.getElementById('orderList');
+            orderListEl.innerHTML = '';
+
+            orderQueue.forEach((order, index) => {
+                const item = document.createElement('div');
+                item.className = 'order-item';
+                item.dataset.orderNumber = String(order);
+                if (index === 0 && order === currentNumber) {
+                    item.classList.add('active');
+                }
+                item.textContent = order;
+                item.addEventListener('click', () => removeOrder(order));
+                orderListEl.appendChild(item);
+            });
+        }
+
+        // 현재 호출 번호 렌더링
+        function renderCurrentNumber(showCall = true) {
+            const callNumberEl = document.getElementById('callNumber');
+            const callMessageEl = document.getElementById('callMessage');
+            const callDisplayEl = document.querySelector('.call-display');
+
+            callNumberEl.textContent = currentNumber;
+            callMessageEl.textContent = `${currentNumber}번 고객님 주문하신 음료 나왔습니다.`;
+
+            if (showCall && callDisplayEl) {
+                // 기존 타임아웃이 있으면 클리어
+                if (callDisplayTimeout) {
+                    clearTimeout(callDisplayTimeout);
+                }
+
+                // 호출 표시를 보여줌
+                callDisplayEl.classList.remove('hidden');
+
+                // 애니메이션 효과
+                callNumberEl.classList.remove('animate');
+                setTimeout(() => {
+                    callNumberEl.classList.add('animate');
+                }, 10);
+
+                // 7초 후에 호출 표시를 슬라이드 아웃
+                callDisplayTimeout = setTimeout(() => {
+                    if (callDisplayEl) {
+                        callDisplayEl.classList.add('hidden');
+                    }
+                }, 7000);
+            } else if (callDisplayEl) {
+                // 숨기기
+                callDisplayEl.classList.add('hidden');
+            }
+        }
+
+        // 새 주문 추가
+        function addOrder(number) {
+            if (!number || number <= 0) {
+                alert('올바른 주문번호를 입력해주세요.');
+                return;
+            }
+
+            // 이미 존재하는 번호는 맨 앞으로 이동
+            const index = orderQueue.indexOf(number);
+            if (index > -1) {
+                orderQueue.splice(index, 1);
+            }
+
+            orderQueue.unshift(number);
+            saveToStorage();
+            renderOrderList();
+        }
+
+        // 다음 번호 호출
+        function callNext() {
+            if (orderQueue.length === 0) {
+                alert('호출할 주문이 없습니다.');
+                return;
+            }
+
+            const nextNumber = orderQueue[0];
+            callNumber(nextNumber, removeOnCall);
+        }
+
+        // 특정 번호 호출
+        function callSpecificNumber(number) {
+            if (!number || number <= 0) {
+                alert('올바른 주문번호를 입력해주세요.');
+                return;
+            }
+
+            // 리스트에 없으면 추가
+            if (!orderQueue.includes(number)) {
+                orderQueue.unshift(number);
+                saveToStorage();
+                renderOrderList();
+            } else {
+                // 있으면 맨 앞으로 이동
+                const index = orderQueue.indexOf(number);
+                if (index > 0) {
+                    orderQueue.splice(index, 1);
+                    orderQueue.unshift(number);
+                    saveToStorage();
+                    renderOrderList();
+                }
+            }
+
+            callNumber(number, false); // 수동 호출은 제거하지 않음
+        }
+
+        // 번호 호출
+        function callNumber(number, shouldRemove) {
+            currentNumber = number;
+
+            if (shouldRemove && orderQueue.length > 0 && orderQueue[0] === number) {
+                orderQueue.shift();
+            }
+
+            saveToStorage();
+            renderOrderList();
+            renderCurrentNumber();
+
+            // 음성 안내
+            if (ttsEnabled) {
+                speakNumber(number);
+            }
+
+            // 자동 제거 스케줄 (호출 시 리스트에서 제거하지 않은 경우에 한함)
+            try { cancelAutoRemove(number); } catch {}
+            if (!shouldRemove) {
+                scheduleAutoRemove(number);
+            }
+        }
+
+        // 주문 제거
+        function removeOrder(number) {
+            cancelAutoRemove(number);
+            const index = orderQueue.indexOf(number);
+            if (index > -1) {
+                orderQueue.splice(index, 1);
+                saveToStorage();
+                renderOrderList();
+            }
+        }
+
+        function scheduleAutoRemove(number) {
+            // 기존 타이머 클리어
+            cancelAutoRemove(number);
+            const timeoutId = setTimeout(() => {
+                const selector = `.order-item[data-order-number="${number}"]`;
+                const itemEl = document.querySelector(selector);
+                if (itemEl) {
+                    // 슬라이드 아웃
+                    itemEl.classList.add('exit');
+                    setTimeout(() => {
+                        const idx = orderQueue.indexOf(number);
+                        if (idx > -1) {
+                            orderQueue.splice(idx, 1);
+                            saveToStorage();
+                            renderOrderList();
+                        }
+                        autoRemoveTimers.delete(number);
+                    }, EXIT_ANIM_MS);
+                } else {
+                    // 엘리먼트가 없으면 즉시 제거
+                    const idx = orderQueue.indexOf(number);
+                    if (idx > -1) {
+                        orderQueue.splice(idx, 1);
+                        saveToStorage();
+                        renderOrderList();
+                    }
+                    autoRemoveTimers.delete(number);
+                }
+            }, AUTO_REMOVE_MS);
+            autoRemoveTimers.set(number, timeoutId);
+        }
+
+        function cancelAutoRemove(number) {
+            const timeoutId = autoRemoveTimers.get(number);
+            if (timeoutId) {
+                clearTimeout(timeoutId);
+                autoRemoveTimers.delete(number);
+            }
+        }
+
+        // 숫자를 한글로 변환
+        function numberToKorean(num) {
+            const koreanNumbers = ['', '일', '이', '삼', '사', '오', '육', '칠', '팔', '구'];
+
+            if (num === 0) return '영';
+            if (num < 10) return koreanNumbers[num];
+
+            const numStr = num.toString();
+            const len = numStr.length;
+            let result = '';
+
+            for (let i = 0; i < len; i++) {
+                const digit = parseInt(numStr[i]);
+                const position = len - i - 1;
+
+                if (digit === 0) continue;
+
+                // 일의 자리
+                if (position === 0) {
+                    result += koreanNumbers[digit];
+                }
+                // 십의 자리
+                else if (position === 1) {
+                    if (digit === 1) {
+                        result += '십';
+                    } else {
+                        result += koreanNumbers[digit] + '십';
+                    }
+                }
+                // 백의 자리
+                else if (position === 2) {
+                    if (digit === 1) {
+                        result += '백';
+                    } else {
+                        result += koreanNumbers[digit] + '백';
+                    }
+                }
+                // 천의 자리
+                else if (position === 3) {
+                    if (digit === 1) {
+                        result += '천';
+                    } else {
+                        result += koreanNumbers[digit] + '천';
+                    }
+                }
+                // 만의 자리
+                else if (position === 4) {
+                    if (digit === 1) {
+                        result += '만';
+                    } else {
+                        result += koreanNumbers[digit] + '만';
+                    }
+                }
+                // 십만 이상은 간단 처리
+                else if (position >= 5) {
+                    result += koreanNumbers[digit];
+                    if (position === 5) result += '십';
+                    else if (position === 6) result += '백';
+                    else if (position === 7) result += '천';
+                    else if (position === 8) result += '만';
+                }
+            }
+
+            return result;
+        }
+
+        // 음성 안내 (로컬 MP3 시퀀스 재생)
+        function speakNumber(number) {
+            const chunks = numberToPlaceValues(number);
+            const urls = chunks.map(v => `${AUDIO_BASE}/${v}${AUDIO_EXT}`);
+            urls.push(`${AUDIO_BASE}/${AUDIO_LAST}${AUDIO_EXT}`);
+            playSequence(urls).catch(err => console.error('오디오 재생 오류:', err));
+        }
+
+        // 슬라이드쇼 시작
+        function startSlideShow() {
+            const slides = document.querySelectorAll('.slide');
+            if (slides.length === 0) return;
+
+            slideInterval = setInterval(() => {
+                slides[slideIndex].classList.remove('active');
+                slideIndex = (slideIndex + 1) % slides.length;
+                slides[slideIndex].classList.add('active');
+            }, 9000); // 9초마다 전환
+        }
+
+        // 전체 초기화
+        function resetAll() {
+            if (!confirm('모든 주문을 초기화하시겠습니까?')) {
+                return;
+            }
+
+            orderQueue = [157, 160, 159, 158, 210, 368];
+            currentNumber = 157;
+            removeOnCall = false;
+            ttsEnabled = true;
+
+            localStorage.clear();
+            saveToStorage();
+            updateToggleStates();
+            renderOrderList();
+            renderCurrentNumber();
+
+            alert('초기화가 완료되었습니다.');
+        }
+
+        // 토글 상태 업데이트
+        function updateToggleStates() {
+            const removeToggle = document.getElementById('removeOnCallToggle');
+            const ttsToggle = document.getElementById('ttsToggle');
+
+            if (removeOnCall) {
+                removeToggle.classList.add('active');
+            } else {
+                removeToggle.classList.remove('active');
+            }
+
+            if (ttsEnabled) {
+                ttsToggle.classList.add('active');
+            } else {
+                ttsToggle.classList.remove('active');
+            }
+        }
+
+        // 키패드 입력 처리
+        let newOrderValue = '0';
+        let callSpecificValue = '0';
+        let mainKeypadValue = '0';
+
+        function updateDisplay(displayId, value) {
+            const display = document.getElementById(displayId);
+            if (display) {
+                display.textContent = value || '0';
+            }
+        }
+
+        function handleKeypadClick(keypadId, displayId, valueVar, action) {
+            const keypad = document.getElementById(keypadId);
+            if (!keypad) return;
+
+            keypad.addEventListener('click', (e) => {
+                const btn = e.target.closest('.keypad-btn');
+                if (!btn) return;
+
+                const key = btn.getAttribute('data-key');
+                const actionType = btn.getAttribute('data-action');
+
+                if (key) {
+                    // 숫자 입력
+                    if (valueVar === 'newOrderValue') {
+                        if (newOrderValue === '0') {
+                            newOrderValue = key;
+                        } else {
+                            newOrderValue += key;
+                        }
+                        updateDisplay(displayId, newOrderValue);
+                    } else if (valueVar === 'callSpecificValue') {
+                        if (callSpecificValue === '0') {
+                            callSpecificValue = key;
+                        } else {
+                            callSpecificValue += key;
+                        }
+                        updateDisplay(displayId, callSpecificValue);
+                    }
+                } else if (actionType === 'clear') {
+                    // 지우기
+                    if (valueVar === 'newOrderValue') {
+                        newOrderValue = '0';
+                        updateDisplay(displayId, newOrderValue);
+                    } else if (valueVar === 'callSpecificValue') {
+                        callSpecificValue = '0';
+                        updateDisplay(displayId, callSpecificValue);
+                    }
+                } else if (actionType === action) {
+                    // 실행 버튼 (추가/호출)
+                    if (valueVar === 'newOrderValue') {
+                        const number = parseInt(newOrderValue);
+                        if (number && number > 0) {
+                            addOrder(number);
+                            newOrderValue = '0';
+                            updateDisplay(displayId, newOrderValue);
+                        }
+                    } else if (valueVar === 'callSpecificValue') {
+                        const number = parseInt(callSpecificValue);
+                        if (number && number > 0) {
+                            callSpecificNumber(number);
+                            callSpecificValue = '0';
+                            updateDisplay(displayId, callSpecificValue);
+                        }
+                    }
+                }
+            });
+        }
+
+        // 이벤트 리스너 설정
+        function setupEventListeners() {
+            const adminModal = document.getElementById('adminModal');
+
+            // 모달 외부 클릭 시 닫기
+            adminModal.addEventListener('click', (e) => {
+                if (e.target === adminModal) {
+                    adminModal.classList.remove('active');
+                }
+            });
+
+            // 키패드 이벤트 설정
+            handleKeypadClick('newOrderKeypad', 'newOrderDisplay', 'newOrderValue', 'add');
+            handleKeypadClick('callSpecificKeypad', 'callSpecificDisplay', 'callSpecificValue', 'call');
+
+            // 키보드 입력 지원 (화면에서 직접 번호 입력)
+            document.addEventListener('keydown', (e) => {
+                // 관리자 모달이 열려있거나 입력 필드에 포커스가 있으면 키보드 입력 무시
+                if (document.getElementById('adminModal').classList.contains('active')) {
+                    return;
+                }
+                if (document.activeElement.tagName === 'INPUT') {
+                    return;
+                }
+
+                // 숫자 키 입력
+                if (e.key >= '0' && e.key <= '9') {
+                    if (mainKeypadValue === '0') {
+                        mainKeypadValue = e.key;
+                    } else {
+                        mainKeypadValue += e.key;
+                    }
+                }
+                // 백스페이스 키 - 지우기
+                else if (e.key === 'Backspace') {
+                    if (mainKeypadValue.length > 1) {
+                        mainKeypadValue = mainKeypadValue.slice(0, -1);
+                    } else {
+                        mainKeypadValue = '0';
+                    }
+                }
+                // 엔터 키 - 호출
+                else if (e.key === 'Enter') {
+                    const number = parseInt(mainKeypadValue);
+                    if (number && number > 0) {
+                        callSpecificNumber(number);
+                        mainKeypadValue = '0';
+                    }
+                }
+            });
+
+            // 새 주문 추가 (기존 입력 필드 - 숨김 처리했지만 남겨둠)
+            const addOrderBtn = document.getElementById('addOrderBtn');
+            const newOrderInput = document.getElementById('newOrderInput');
+
+            addOrderBtn.addEventListener('click', () => {
+                const number = parseInt(newOrderInput.value);
+                if (number) {
+                    addOrder(number);
+                    newOrderInput.value = '';
+                }
+            });
+
+            newOrderInput.addEventListener('keypress', (e) => {
+                if (e.key === 'Enter') {
+                    addOrderBtn.click();
+                }
+            });
+
+            // 다음 번호 호출
+            const callNextBtn = document.getElementById('callNextBtn');
+            callNextBtn.addEventListener('click', callNext);
+
+            // 특정 번호 호출
+            const callSpecificBtn = document.getElementById('callSpecificBtn');
+            const callSpecificInput = document.getElementById('callSpecificInput');
+
+            callSpecificBtn.addEventListener('click', () => {
+                const number = parseInt(callSpecificInput.value);
+                if (number) {
+                    callSpecificNumber(number);
+                    callSpecificInput.value = '';
+                }
+            });
+
+            callSpecificInput.addEventListener('keypress', (e) => {
+                if (e.key === 'Enter') {
+                    callSpecificBtn.click();
+                }
+            });
+
+            // 호출 시 리스트에서 제거 토글
+            const removeOnCallToggle = document.getElementById('removeOnCallToggle');
+            removeOnCallToggle.addEventListener('click', () => {
+                removeOnCall = !removeOnCall;
+                saveToStorage();
+                updateToggleStates();
+            });
+
+            // 음성 안내 토글
+            const ttsToggle = document.getElementById('ttsToggle');
+            ttsToggle.addEventListener('click', () => {
+                ttsEnabled = !ttsEnabled;
+                saveToStorage();
+                updateToggleStates();
+            });
+
+            // 전체 초기화
+            const resetBtn = document.getElementById('resetBtn');
+            resetBtn.addEventListener('click', resetAll);
+        }
+
+        // 페이지 로드 시 초기화
+        document.addEventListener('DOMContentLoaded', init);
+    </script>
+</body>
+</html>
+
