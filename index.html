@@ -702,6 +702,8 @@
         const AUTO_REMOVE_MS = 5 * 60 * 1000; // 5분
         const EXIT_ANIM_MS = 800; // 슬라이드 아웃 애니메이션 시간
         const autoRemoveTimers = new Map(); // number -> timeoutId
+        let isCalling = false; // 현재 호출 진행 중인지
+        let pendingCall = null; // 대기 중인 호출 { number, shouldRemove }
 
         // 로컬 MP3 재생 설정 및 헬퍼
         // 예: index.html과 같은 폴더에 tts 폴더
@@ -810,7 +812,7 @@
         }
 
         // 현재 호출 번호 렌더링
-        function renderCurrentNumber(showCall = true) {
+        function renderCurrentNumber(showCall = true, onDisplayComplete = null) {
             const callNumberEl = document.getElementById('callNumber');
             const callMessageEl = document.getElementById('callMessage');
             const callDisplayEl = document.querySelector('.call-display');
@@ -837,6 +839,10 @@
                 callDisplayTimeout = setTimeout(() => {
                     if (callDisplayEl) {
                         callDisplayEl.classList.add('hidden');
+                    }
+                    // 호출 표시 완료 콜백 실행
+                    if (onDisplayComplete) {
+                        onDisplayComplete();
                     }
                 }, 7000);
             } else if (callDisplayEl) {
@@ -900,8 +906,39 @@
             callNumber(number, false); // 수동 호출은 제거하지 않음
         }
 
-        // 번호 호출
-        function callNumber(number, shouldRemove) {
+        // 호출 화면 슬라이드 아웃
+        function hideCallDisplay() {
+            // 기존 타임아웃이 있으면 클리어
+            if (callDisplayTimeout) {
+                clearTimeout(callDisplayTimeout);
+                callDisplayTimeout = null;
+            }
+            
+            // 호출 표시를 슬라이드 아웃
+            const callDisplayEl = document.querySelector('.call-display');
+            if (callDisplayEl) {
+                callDisplayEl.classList.add('hidden');
+            }
+        }
+
+        // 호출 완료 처리 (음성 재생 완료 후)
+        function onCallComplete() {
+            // 화면 슬라이드 아웃
+            hideCallDisplay();
+            
+            isCalling = false;
+            
+            // 대기 중인 호출이 있으면 실행
+            if (pendingCall) {
+                const { number, shouldRemove } = pendingCall;
+                pendingCall = null;
+                executeCall(number, shouldRemove);
+            }
+        }
+
+        // 실제 호출 실행
+        function executeCall(number, shouldRemove) {
+            isCalling = true;
             currentNumber = number;
 
             if (shouldRemove && orderQueue.length > 0 && orderQueue[0] === number) {
@@ -910,11 +947,20 @@
 
             saveToStorage();
             renderOrderList();
-            renderCurrentNumber();
 
-            // 음성 안내
+            // 호출 표시
+            renderCurrentNumber(true);
+
+            // 음성 안내 - 재생이 끝나면 바로 다음 호출 시작
             if (ttsEnabled) {
-                speakNumber(number);
+                speakNumber(number).then(() => {
+                    onCallComplete();
+                }).catch(() => {
+                    onCallComplete();
+                });
+            } else {
+                // 음성 안내가 비활성화되어 있으면 즉시 완료
+                onCallComplete();
             }
 
             // 자동 제거 스케줄 (호출 시 리스트에서 제거하지 않은 경우에 한함)
@@ -922,6 +968,18 @@
             if (!shouldRemove) {
                 scheduleAutoRemove(number);
             }
+        }
+
+        // 번호 호출
+        function callNumber(number, shouldRemove) {
+            // 현재 호출이 진행 중이면 대기 큐에 저장
+            if (isCalling) {
+                pendingCall = { number, shouldRemove };
+                return;
+            }
+            
+            // 호출이 진행 중이 아니면 즉시 실행
+            executeCall(number, shouldRemove);
         }
 
         // 주문 제거
@@ -1046,7 +1104,10 @@
             const chunks = numberToPlaceValues(number);
             const urls = chunks.map(v => `${AUDIO_BASE}${v}${AUDIO_EXT}`);
             urls.push(`${AUDIO_BASE}${AUDIO_LAST}${AUDIO_EXT}`);
-            playSequence(urls).catch(err => console.error('오디오 재생 오류:', err));
+            return playSequence(urls).catch(err => {
+                console.error('오디오 재생 오류:', err);
+                throw err;
+            });
         }
 
         // 슬라이드쇼 시작
@@ -1058,7 +1119,7 @@
                 slides[slideIndex].classList.remove('active');
                 slideIndex = (slideIndex + 1) % slides.length;
                 slides[slideIndex].classList.add('active');
-            }, 6000); // 9초마다 전환
+            }, 7000); // 9초마다 전환
         }
 
         // 전체 초기화
@@ -1286,8 +1347,6 @@
     </script>
 </body>
 </html>
-
-
 
 
 
