@@ -1044,8 +1044,8 @@
         // 음성 안내 (로컬 MP3 시퀀스 재생)
         function speakNumber(number) {
             const chunks = numberToPlaceValues(number);
-            const urls = chunks.map(v => `${AUDIO_BASE}/${v}${AUDIO_EXT}`);
-            urls.push(`${AUDIO_BASE}/${AUDIO_LAST}${AUDIO_EXT}`);
+            const urls = chunks.map(v => `${AUDIO_BASE}${v}${AUDIO_EXT}`);
+            urls.push(`${AUDIO_BASE}${AUDIO_LAST}${AUDIO_EXT}`);
             playSequence(urls).catch(err => console.error('오디오 재생 오류:', err));
         }
 
@@ -1058,7 +1058,7 @@
                 slides[slideIndex].classList.remove('active');
                 slideIndex = (slideIndex + 1) % slides.length;
                 slides[slideIndex].classList.add('active');
-            }, 9000); // 9초마다 전환
+            }, 6000); // 9초마다 전환
         }
 
         // 전체 초기화
@@ -1286,6 +1286,7 @@
     </script>
 </body>
 </html>
+
 
 
 
