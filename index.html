@@ -680,6 +680,14 @@
                     <span class="toggle-label">음성 안내 사용</span>
                     <div class="toggle-switch active" id="ttsToggle"></div>
                 </div>
+                <div class="toggle-group">
+                    <span class="toggle-label">자동 번호 호출</span>
+                    <div class="toggle-switch" id="autoCallToggle"></div>
+                </div>
+                <div class="input-group">
+                    <input type="number" id="autoCallMinInput" min="10" max="300" value="10" placeholder="최소 초">
+                    <input type="number" id="autoCallMaxInput" min="10" max="300" value="300" placeholder="최대 초">
+                </div>
             </section>
 
             <!-- 전체 초기화 -->
@@ -703,7 +711,11 @@
         const EXIT_ANIM_MS = 800; // 슬라이드 아웃 애니메이션 시간
         const autoRemoveTimers = new Map(); // number -> timeoutId
         let isCalling = false; // 현재 호출 진행 중인지
-        let pendingCall = null; // 대기 중인 호출 { number, shouldRemove }
+        let pendingCalls = []; // 대기 중인 호출 목록
+        let autoCallEnabled = false;
+        let autoCallMinSeconds = 10;
+        let autoCallMaxSeconds = 300;
+        let autoCallTimer = null;
 
         // 로컬 MP3 재생 설정 및 헬퍼
         // 예: index.html과 같은 폴더에 tts 폴더
@@ -711,6 +723,7 @@
         const AUDIO_EXT = '.mp3';
         const AUDIO_LAST = 'last';
         let currentAudio = null;
+        const audioCache = new Map();
 
         function numberToPlaceValues(n) {
             const trimmed = String(n).replace(/^0+/, '') || '0';
@@ -729,7 +742,8 @@
                     try { currentAudio.pause(); currentAudio.src = ''; } catch {}
                     currentAudio = null;
                 }
-                const audio = new Audio(url);
+                const cachedAudio = audioCache.get(url);
+                const audio = cachedAudio ? cachedAudio.cloneNode() : new Audio(url);
                 currentAudio = audio;
                 audio.onended = () => resolve();
                 audio.onerror = () => reject(new Error('오디오 로드 실패: ' + url));
@@ -749,7 +763,10 @@
             ORDER_QUEUE: 'cafe_orderQueue',
             CURRENT_NUMBER: 'cafe_currentNumber',
             REMOVE_ON_CALL: 'cafe_removeOnCall',
-            TTS_ENABLED: 'cafe_ttsEnabled'
+            TTS_ENABLED: 'cafe_ttsEnabled',
+            AUTO_CALL_ENABLED: 'cafe_autoCallEnabled',
+            AUTO_CALL_MIN_SECONDS: 'cafe_autoCallMinSeconds',
+            AUTO_CALL_MAX_SECONDS: 'cafe_autoCallMaxSeconds'
         };
 
         // 초기화
@@ -759,6 +776,9 @@
             renderCurrentNumber(false); // 초기 로드 시에는 호출 표시 숨김
             startSlideShow();
             setupEventListeners();
+            preloadAudioAssets();
+            setupStorageSync();
+            rescheduleAutoCall();
         }
 
         // localStorage에서 데이터 불러오기
@@ -767,6 +787,9 @@
             const savedNumber = localStorage.getItem(STORAGE_KEYS.CURRENT_NUMBER);
             const savedRemoveOnCall = localStorage.getItem(STORAGE_KEYS.REMOVE_ON_CALL);
             const savedTtsEnabled = localStorage.getItem(STORAGE_KEYS.TTS_ENABLED);
+            const savedAutoCallEnabled = localStorage.getItem(STORAGE_KEYS.AUTO_CALL_ENABLED);
+            const savedAutoCallMinSeconds = localStorage.getItem(STORAGE_KEYS.AUTO_CALL_MIN_SECONDS);
+            const savedAutoCallMaxSeconds = localStorage.getItem(STORAGE_KEYS.AUTO_CALL_MAX_SECONDS);
 
             if (savedQueue) {
                 orderQueue = JSON.parse(savedQueue);
@@ -780,9 +803,20 @@
             if (savedTtsEnabled !== null) {
                 ttsEnabled = savedTtsEnabled === 'true';
             }
+            if (savedAutoCallEnabled !== null) {
+                autoCallEnabled = savedAutoCallEnabled === 'true';
+            }
+            if (savedAutoCallMinSeconds !== null) {
+                autoCallMinSeconds = clampAutoCallSeconds(parseInt(savedAutoCallMinSeconds, 10), 10);
+            }
+            if (savedAutoCallMaxSeconds !== null) {
+                autoCallMaxSeconds = clampAutoCallSeconds(parseInt(savedAutoCallMaxSeconds, 10), 300);
+            }
+            normalizeAutoCallRange();
 
             // 토글 상태 업데이트
             updateToggleStates();
+            updateAutoCallInputs();
         }
 
         // localStorage에 데이터 저장
@@ -791,6 +825,9 @@
             localStorage.setItem(STORAGE_KEYS.CURRENT_NUMBER, currentNumber.toString());
             localStorage.setItem(STORAGE_KEYS.REMOVE_ON_CALL, removeOnCall.toString());
             localStorage.setItem(STORAGE_KEYS.TTS_ENABLED, ttsEnabled.toString());
+            localStorage.setItem(STORAGE_KEYS.AUTO_CALL_ENABLED, autoCallEnabled.toString());
+            localStorage.setItem(STORAGE_KEYS.AUTO_CALL_MIN_SECONDS, autoCallMinSeconds.toString());
+            localStorage.setItem(STORAGE_KEYS.AUTO_CALL_MAX_SECONDS, autoCallMaxSeconds.toString());
         }
 
         // 주문 리스트 렌더링
@@ -929,11 +966,13 @@
             isCalling = false;
             
             // 대기 중인 호출이 있으면 실행
-            if (pendingCall) {
-                const { number, shouldRemove } = pendingCall;
-                pendingCall = null;
+            if (pendingCalls.length > 0) {
+                const { number, shouldRemove } = pendingCalls.shift();
                 executeCall(number, shouldRemove);
+                return;
             }
+
+            rescheduleAutoCall();
         }
 
         // 실제 호출 실행
@@ -947,6 +986,7 @@
 
             saveToStorage();
             renderOrderList();
+            rescheduleAutoCall();
 
             // 호출 표시
             renderCurrentNumber(true);
@@ -974,7 +1014,7 @@
         function callNumber(number, shouldRemove) {
             // 현재 호출이 진행 중이면 대기 큐에 저장
             if (isCalling) {
-                pendingCall = { number, shouldRemove };
+                pendingCalls.push({ number, shouldRemove });
                 return;
             }
             
@@ -1110,6 +1150,95 @@
             });
         }
 
+        function preloadAudioAssets() {
+            const presetValues = new Set([AUDIO_LAST]);
+            for (let i = 1; i <= 9; i++) presetValues.add(String(i));
+            for (let i = 10; i <= 90; i += 10) presetValues.add(String(i));
+            for (let i = 100; i <= 900; i += 100) presetValues.add(String(i));
+            for (let i = 1000; i <= 9000; i += 1000) presetValues.add(String(i));
+            for (let i = 10000; i <= 90000; i += 10000) presetValues.add(String(i));
+
+            presetValues.forEach((value) => {
+                const url = `${AUDIO_BASE}${value}${AUDIO_EXT}`;
+                const audio = new Audio();
+                audio.preload = 'auto';
+                audio.src = url;
+                audio.load();
+                audioCache.set(url, audio);
+            });
+        }
+
+        function clampAutoCallSeconds(value, fallback) {
+            if (!Number.isFinite(value)) return fallback;
+            return Math.min(300, Math.max(10, value));
+        }
+
+        function normalizeAutoCallRange() {
+            autoCallMinSeconds = clampAutoCallSeconds(autoCallMinSeconds, 10);
+            autoCallMaxSeconds = clampAutoCallSeconds(autoCallMaxSeconds, 300);
+            if (autoCallMinSeconds > autoCallMaxSeconds) {
+                const temp = autoCallMinSeconds;
+                autoCallMinSeconds = autoCallMaxSeconds;
+                autoCallMaxSeconds = temp;
+            }
+        }
+
+        function updateAutoCallInputs() {
+            const minInput = document.getElementById('autoCallMinInput');
+            const maxInput = document.getElementById('autoCallMaxInput');
+            if (minInput) minInput.value = String(autoCallMinSeconds);
+            if (maxInput) maxInput.value = String(autoCallMaxSeconds);
+        }
+
+        function clearAutoCallTimer() {
+            if (autoCallTimer) {
+                clearTimeout(autoCallTimer);
+                autoCallTimer = null;
+            }
+        }
+
+        function getRandomAutoCallDelayMs() {
+            const minMs = autoCallMinSeconds * 1000;
+            const maxMs = autoCallMaxSeconds * 1000;
+            if (minMs === maxMs) return minMs;
+            return Math.floor(Math.random() * (maxMs - minMs + 1)) + minMs;
+        }
+
+        function rescheduleAutoCall() {
+            clearAutoCallTimer();
+
+            if (!autoCallEnabled || isCalling || pendingCalls.length > 0 || orderQueue.length === 0) {
+                return;
+            }
+
+            autoCallTimer = setTimeout(() => {
+                autoCallTimer = null;
+                if (!autoCallEnabled || isCalling || orderQueue.length === 0) {
+                    return;
+                }
+                callNext();
+            }, getRandomAutoCallDelayMs());
+        }
+
+        function setupStorageSync() {
+            window.addEventListener('storage', (event) => {
+                if (!Object.values(STORAGE_KEYS).includes(event.key)) {
+                    return;
+                }
+
+                const previousNumber = currentNumber;
+                loadFromStorage();
+                renderOrderList();
+                renderCurrentNumber(false);
+
+                if (!isCalling && currentNumber !== previousNumber) {
+                    renderCurrentNumber(true);
+                }
+
+                rescheduleAutoCall();
+            });
+        }
+
         // 슬라이드쇼 시작
         function startSlideShow() {
             const slides = document.querySelectorAll('.slide');
@@ -1132,10 +1261,16 @@
             currentNumber = 157;
             removeOnCall = false;
             ttsEnabled = true;
+            autoCallEnabled = false;
+            autoCallMinSeconds = 10;
+            autoCallMaxSeconds = 300;
+            pendingCalls = [];
+            clearAutoCallTimer();
 
             localStorage.clear();
             saveToStorage();
             updateToggleStates();
+            updateAutoCallInputs();
             renderOrderList();
             renderCurrentNumber();
 
@@ -1146,6 +1281,7 @@
         function updateToggleStates() {
             const removeToggle = document.getElementById('removeOnCallToggle');
             const ttsToggle = document.getElementById('ttsToggle');
+            const autoCallToggle = document.getElementById('autoCallToggle');
 
             if (removeOnCall) {
                 removeToggle.classList.add('active');
@@ -1157,6 +1293,12 @@
                 ttsToggle.classList.add('active');
             } else {
                 ttsToggle.classList.remove('active');
+            }
+
+            if (autoCallEnabled) {
+                autoCallToggle.classList.add('active');
+            } else {
+                autoCallToggle.classList.remove('active');
             }
         }
 
@@ -1336,6 +1478,29 @@
                 saveToStorage();
                 updateToggleStates();
             });
+
+            const autoCallToggle = document.getElementById('autoCallToggle');
+            const autoCallMinInput = document.getElementById('autoCallMinInput');
+            const autoCallMaxInput = document.getElementById('autoCallMaxInput');
+
+            autoCallToggle.addEventListener('click', () => {
+                autoCallEnabled = !autoCallEnabled;
+                saveToStorage();
+                updateToggleStates();
+                rescheduleAutoCall();
+            });
+
+            const handleAutoCallRangeChange = () => {
+                autoCallMinSeconds = clampAutoCallSeconds(parseInt(autoCallMinInput.value, 10), autoCallMinSeconds);
+                autoCallMaxSeconds = clampAutoCallSeconds(parseInt(autoCallMaxInput.value, 10), autoCallMaxSeconds);
+                normalizeAutoCallRange();
+                updateAutoCallInputs();
+                saveToStorage();
+                rescheduleAutoCall();
+            };
+
+            autoCallMinInput.addEventListener('change', handleAutoCallRangeChange);
+            autoCallMaxInput.addEventListener('change', handleAutoCallRangeChange);
 
             // 전체 초기화
             const resetBtn = document.getElementById('resetBtn');
