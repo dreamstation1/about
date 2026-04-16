@@ -718,8 +718,8 @@
         let autoCallMinSeconds = 10;
         let autoCallMaxSeconds = 300;
         let autoCallTimer = null;
-        let autoSeries = [130, 220, 330];
-        let lastAutoSeriesIndex = 0;
+        let autoBurstCurrent = null;
+        let autoBurstRemaining = 0;
 
         // 로컬 MP3 재생 설정 및 헬퍼
         // 예: index.html과 같은 폴더에 tts 폴더
@@ -771,8 +771,8 @@
             AUTO_CALL_ENABLED: 'cafe_autoCallEnabled',
             AUTO_CALL_MIN_SECONDS: 'cafe_autoCallMinSeconds',
             AUTO_CALL_MAX_SECONDS: 'cafe_autoCallMaxSeconds',
-            AUTO_SERIES: 'cafe_autoSeries',
-            AUTO_LAST_SERIES_INDEX: 'cafe_autoLastSeriesIndex'
+            AUTO_BURST_CURRENT: 'cafe_autoBurstCurrent',
+            AUTO_BURST_REMAINING: 'cafe_autoBurstRemaining'
         };
 
         // 초기화
@@ -796,8 +796,8 @@
             const savedAutoCallEnabled = localStorage.getItem(STORAGE_KEYS.AUTO_CALL_ENABLED);
             const savedAutoCallMinSeconds = localStorage.getItem(STORAGE_KEYS.AUTO_CALL_MIN_SECONDS);
             const savedAutoCallMaxSeconds = localStorage.getItem(STORAGE_KEYS.AUTO_CALL_MAX_SECONDS);
-            const savedAutoSeries = localStorage.getItem(STORAGE_KEYS.AUTO_SERIES);
-            const savedLastSeriesIndex = localStorage.getItem(STORAGE_KEYS.AUTO_LAST_SERIES_INDEX);
+            const savedAutoBurstCurrent = localStorage.getItem(STORAGE_KEYS.AUTO_BURST_CURRENT);
+            const savedAutoBurstRemaining = localStorage.getItem(STORAGE_KEYS.AUTO_BURST_REMAINING);
 
             if (savedQueue) {
                 orderQueue = JSON.parse(savedQueue);
@@ -820,25 +820,19 @@
             if (savedAutoCallMaxSeconds !== null) {
                 autoCallMaxSeconds = clampAutoCallSeconds(parseInt(savedAutoCallMaxSeconds, 10), 300);
             }
-            if (savedAutoSeries) {
-                try {
-                    const parsedSeries = JSON.parse(savedAutoSeries);
-                    if (Array.isArray(parsedSeries) && parsedSeries.length >= 3) {
-                        autoSeries = parsedSeries
-                            .map((value) => parseInt(value, 10))
-                            .filter((value) => Number.isFinite(value) && value > 0)
-                            .slice(0, 3);
-                    }
-                } catch {}
+            if (savedAutoBurstCurrent !== null) {
+                const parsedCurrent = parseInt(savedAutoBurstCurrent, 10);
+                if (Number.isFinite(parsedCurrent) && parsedCurrent >= 100 && parsedCurrent <= 1099) {
+                    autoBurstCurrent = parsedCurrent;
+                }
             }
-            if (savedLastSeriesIndex !== null) {
-                const parsedIndex = parseInt(savedLastSeriesIndex, 10);
-                if (Number.isInteger(parsedIndex) && parsedIndex >= 0) {
-                    lastAutoSeriesIndex = parsedIndex % autoSeries.length;
+            if (savedAutoBurstRemaining !== null) {
+                const parsedRemaining = parseInt(savedAutoBurstRemaining, 10);
+                if (Number.isInteger(parsedRemaining) && parsedRemaining >= 0) {
+                    autoBurstRemaining = parsedRemaining;
                 }
             }
             normalizeAutoCallRange();
-            normalizeAutoSeries();
 
             // 토글 상태 업데이트
             updateToggleStates();
@@ -854,8 +848,12 @@
             localStorage.setItem(STORAGE_KEYS.AUTO_CALL_ENABLED, autoCallEnabled.toString());
             localStorage.setItem(STORAGE_KEYS.AUTO_CALL_MIN_SECONDS, autoCallMinSeconds.toString());
             localStorage.setItem(STORAGE_KEYS.AUTO_CALL_MAX_SECONDS, autoCallMaxSeconds.toString());
-            localStorage.setItem(STORAGE_KEYS.AUTO_SERIES, JSON.stringify(autoSeries));
-            localStorage.setItem(STORAGE_KEYS.AUTO_LAST_SERIES_INDEX, String(lastAutoSeriesIndex));
+            if (autoBurstCurrent === null) {
+                localStorage.removeItem(STORAGE_KEYS.AUTO_BURST_CURRENT);
+            } else {
+                localStorage.setItem(STORAGE_KEYS.AUTO_BURST_CURRENT, String(autoBurstCurrent));
+            }
+            localStorage.setItem(STORAGE_KEYS.AUTO_BURST_REMAINING, String(autoBurstRemaining));
         }
 
         // 주문 리스트 렌더링
@@ -1201,22 +1199,6 @@
             return Math.min(300, Math.max(10, value));
         }
 
-        function normalizeAutoSeries() {
-            autoSeries = autoSeries
-                .map((value) => parseInt(value, 10))
-                .filter((value) => Number.isFinite(value) && value > 0)
-                .slice(0, 3);
-
-            if (autoSeries.length < 3) {
-                autoSeries = [130, 220, 330];
-            }
-
-            lastAutoSeriesIndex = lastAutoSeriesIndex % autoSeries.length;
-            if (lastAutoSeriesIndex < 0) {
-                lastAutoSeriesIndex = 0;
-            }
-        }
-
         function normalizeAutoCallRange() {
             autoCallMinSeconds = clampAutoCallSeconds(autoCallMinSeconds, 10);
             autoCallMaxSeconds = clampAutoCallSeconds(autoCallMaxSeconds, 300);
@@ -1248,22 +1230,44 @@
             return Math.floor(Math.random() * (maxMs - minMs + 1)) + minMs;
         }
 
+        function getRandomBurstLength() {
+            const roll = Math.random();
+            if (roll < 0.2) return 1;
+            if (roll < 0.65) return 2;
+            if (roll < 0.9) return 3;
+            return 4;
+        }
+
+        function getRandomBurstStart() {
+            return Math.floor(Math.random() * 1000) + 100; // 100 ~ 1099
+        }
+
         function getNextAutoNumber() {
-            normalizeAutoSeries();
+            if (autoBurstRemaining > 0 && autoBurstCurrent !== null && autoBurstCurrent <= 1099) {
+                const number = autoBurstCurrent;
+                autoBurstCurrent += 1;
+                autoBurstRemaining -= 1;
 
-            let seriesIndex = lastAutoSeriesIndex;
-            const shouldContinueSeries = Math.random() < 0.65;
+                if (autoBurstRemaining <= 0 || autoBurstCurrent > 1099) {
+                    autoBurstCurrent = null;
+                    autoBurstRemaining = 0;
+                }
 
-            if (!shouldContinueSeries) {
-                const availableIndices = autoSeries
-                    .map((_, index) => index)
-                    .filter((index) => index !== lastAutoSeriesIndex);
-                seriesIndex = availableIndices[Math.floor(Math.random() * availableIndices.length)];
+                saveToStorage();
+                return number;
             }
 
-            const nextNumber = autoSeries[seriesIndex];
-            autoSeries[seriesIndex] += 1;
-            lastAutoSeriesIndex = seriesIndex;
+            const start = getRandomBurstStart();
+            const burstLength = Math.min(getRandomBurstLength(), 1100 - start);
+            autoBurstCurrent = start + 1;
+            autoBurstRemaining = Math.max(0, burstLength - 1);
+
+            const nextNumber = start;
+
+            if (autoBurstRemaining === 0) {
+                autoBurstCurrent = null;
+            }
+
             saveToStorage();
             return nextNumber;
         }
@@ -1329,8 +1333,8 @@
             autoCallEnabled = false;
             autoCallMinSeconds = 10;
             autoCallMaxSeconds = 300;
-            autoSeries = [130, 220, 330];
-            lastAutoSeriesIndex = 0;
+            autoBurstCurrent = null;
+            autoBurstRemaining = 0;
             pendingCalls = [];
             clearAutoCallTimer();
 
