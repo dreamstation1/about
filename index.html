@@ -610,6 +610,8 @@
         </div>
     </main>
 
+    <button class="admin-toggle" id="adminToggle" type="button">관리자</button>
+
     <!-- 관리자 모달 -->
     <div class="admin-modal" id="adminModal">
         <div class="admin-panel">
@@ -716,6 +718,8 @@
         let autoCallMinSeconds = 10;
         let autoCallMaxSeconds = 300;
         let autoCallTimer = null;
+        let autoSeries = [130, 220, 330];
+        let lastAutoSeriesIndex = 0;
 
         // 로컬 MP3 재생 설정 및 헬퍼
         // 예: index.html과 같은 폴더에 tts 폴더
@@ -766,7 +770,9 @@
             TTS_ENABLED: 'cafe_ttsEnabled',
             AUTO_CALL_ENABLED: 'cafe_autoCallEnabled',
             AUTO_CALL_MIN_SECONDS: 'cafe_autoCallMinSeconds',
-            AUTO_CALL_MAX_SECONDS: 'cafe_autoCallMaxSeconds'
+            AUTO_CALL_MAX_SECONDS: 'cafe_autoCallMaxSeconds',
+            AUTO_SERIES: 'cafe_autoSeries',
+            AUTO_LAST_SERIES_INDEX: 'cafe_autoLastSeriesIndex'
         };
 
         // 초기화
@@ -790,6 +796,8 @@
             const savedAutoCallEnabled = localStorage.getItem(STORAGE_KEYS.AUTO_CALL_ENABLED);
             const savedAutoCallMinSeconds = localStorage.getItem(STORAGE_KEYS.AUTO_CALL_MIN_SECONDS);
             const savedAutoCallMaxSeconds = localStorage.getItem(STORAGE_KEYS.AUTO_CALL_MAX_SECONDS);
+            const savedAutoSeries = localStorage.getItem(STORAGE_KEYS.AUTO_SERIES);
+            const savedLastSeriesIndex = localStorage.getItem(STORAGE_KEYS.AUTO_LAST_SERIES_INDEX);
 
             if (savedQueue) {
                 orderQueue = JSON.parse(savedQueue);
@@ -812,7 +820,25 @@
             if (savedAutoCallMaxSeconds !== null) {
                 autoCallMaxSeconds = clampAutoCallSeconds(parseInt(savedAutoCallMaxSeconds, 10), 300);
             }
+            if (savedAutoSeries) {
+                try {
+                    const parsedSeries = JSON.parse(savedAutoSeries);
+                    if (Array.isArray(parsedSeries) && parsedSeries.length >= 3) {
+                        autoSeries = parsedSeries
+                            .map((value) => parseInt(value, 10))
+                            .filter((value) => Number.isFinite(value) && value > 0)
+                            .slice(0, 3);
+                    }
+                } catch {}
+            }
+            if (savedLastSeriesIndex !== null) {
+                const parsedIndex = parseInt(savedLastSeriesIndex, 10);
+                if (Number.isInteger(parsedIndex) && parsedIndex >= 0) {
+                    lastAutoSeriesIndex = parsedIndex % autoSeries.length;
+                }
+            }
             normalizeAutoCallRange();
+            normalizeAutoSeries();
 
             // 토글 상태 업데이트
             updateToggleStates();
@@ -828,6 +854,8 @@
             localStorage.setItem(STORAGE_KEYS.AUTO_CALL_ENABLED, autoCallEnabled.toString());
             localStorage.setItem(STORAGE_KEYS.AUTO_CALL_MIN_SECONDS, autoCallMinSeconds.toString());
             localStorage.setItem(STORAGE_KEYS.AUTO_CALL_MAX_SECONDS, autoCallMaxSeconds.toString());
+            localStorage.setItem(STORAGE_KEYS.AUTO_SERIES, JSON.stringify(autoSeries));
+            localStorage.setItem(STORAGE_KEYS.AUTO_LAST_SERIES_INDEX, String(lastAutoSeriesIndex));
         }
 
         // 주문 리스트 렌더링
@@ -1173,6 +1201,22 @@
             return Math.min(300, Math.max(10, value));
         }
 
+        function normalizeAutoSeries() {
+            autoSeries = autoSeries
+                .map((value) => parseInt(value, 10))
+                .filter((value) => Number.isFinite(value) && value > 0)
+                .slice(0, 3);
+
+            if (autoSeries.length < 3) {
+                autoSeries = [130, 220, 330];
+            }
+
+            lastAutoSeriesIndex = lastAutoSeriesIndex % autoSeries.length;
+            if (lastAutoSeriesIndex < 0) {
+                lastAutoSeriesIndex = 0;
+            }
+        }
+
         function normalizeAutoCallRange() {
             autoCallMinSeconds = clampAutoCallSeconds(autoCallMinSeconds, 10);
             autoCallMaxSeconds = clampAutoCallSeconds(autoCallMaxSeconds, 300);
@@ -1204,19 +1248,40 @@
             return Math.floor(Math.random() * (maxMs - minMs + 1)) + minMs;
         }
 
+        function getNextAutoNumber() {
+            normalizeAutoSeries();
+
+            let seriesIndex = lastAutoSeriesIndex;
+            const shouldContinueSeries = Math.random() < 0.65;
+
+            if (!shouldContinueSeries) {
+                const availableIndices = autoSeries
+                    .map((_, index) => index)
+                    .filter((index) => index !== lastAutoSeriesIndex);
+                seriesIndex = availableIndices[Math.floor(Math.random() * availableIndices.length)];
+            }
+
+            const nextNumber = autoSeries[seriesIndex];
+            autoSeries[seriesIndex] += 1;
+            lastAutoSeriesIndex = seriesIndex;
+            saveToStorage();
+            return nextNumber;
+        }
+
         function rescheduleAutoCall() {
             clearAutoCallTimer();
 
-            if (!autoCallEnabled || isCalling || pendingCalls.length > 0 || orderQueue.length === 0) {
+            if (!autoCallEnabled || isCalling || pendingCalls.length > 0) {
                 return;
             }
 
             autoCallTimer = setTimeout(() => {
                 autoCallTimer = null;
-                if (!autoCallEnabled || isCalling || orderQueue.length === 0) {
+                if (!autoCallEnabled || isCalling) {
                     return;
                 }
-                callNext();
+                const nextNumber = getNextAutoNumber();
+                callSpecificNumber(nextNumber);
             }, getRandomAutoCallDelayMs());
         }
 
@@ -1264,6 +1329,8 @@
             autoCallEnabled = false;
             autoCallMinSeconds = 10;
             autoCallMaxSeconds = 300;
+            autoSeries = [130, 220, 330];
+            lastAutoSeriesIndex = 0;
             pendingCalls = [];
             clearAutoCallTimer();
 
@@ -1374,7 +1441,12 @@
 
         // 이벤트 리스너 설정
         function setupEventListeners() {
+            const adminToggle = document.getElementById('adminToggle');
             const adminModal = document.getElementById('adminModal');
+
+            adminToggle.addEventListener('click', () => {
+                adminModal.classList.toggle('active');
+            });
 
             // 모달 외부 클릭 시 닫기
             adminModal.addEventListener('click', (e) => {
